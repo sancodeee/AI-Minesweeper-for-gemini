@@ -1,95 +1,152 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { CellData, CellState, AiHint } from '../types';
 
-// Initialize Gemini Client
-// Note: We use process.env.API_KEY as per instructions.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Mock AI Service - Local Minesweeper Logic
+// Replaces Google Gemini API with local logic for demonstration
+
+// Local Minesweeper logic to find safe moves
+const findSafeMove = (board: CellData[][]): AiHint | null => {
+  const rows = board.length;
+  const cols = board[0].length;
+
+  // Strategy 1: Find cells that are definitely safe
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = board[r][c];
+      if (cell.state === CellState.REVEALED && cell.neighborMines > 0) {
+        // Get all neighbors
+        const neighbors = [];
+        let flaggedCount = 0;
+        let hiddenCount = 0;
+
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r + dr;
+            const nc = c + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+              neighbors.push(board[nr][nc]);
+              if (board[nr][nc].state === CellState.FLAGGED) flaggedCount++;
+              if (board[nr][nc].state === CellState.HIDDEN) hiddenCount++;
+            }
+          }
+        }
+
+        // If all mines are found, other hidden neighbors are safe
+        if (flaggedCount === cell.neighborMines && hiddenCount > flaggedCount) {
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const nr = r + dr;
+              const nc = c + dc;
+              if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                if (board[nr][nc].state === CellState.HIDDEN) {
+                  return {
+                    row: nr,
+                    col: nc,
+                    confidence: 1.0,
+                    reasoning: `Cell (${nr}, ${nc}) is safe because all ${cell.neighborMines} mines around cell (${r}, ${c}) are already flagged.`
+                  };
+                }
+              }
+            }
+          }
+        }
+
+        // If hidden cells equal remaining mines, all are mines
+        if (hiddenCount === cell.neighborMines - flaggedCount && hiddenCount > 0) {
+          // This would help with flagging, but we need to reveal a safe cell
+          continue;
+        }
+      }
+    }
+  }
+
+  // Strategy 2: Find the safest hidden cell based on probability
+  let safestCell: { row: number; col: number; risk: number } | null = null;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = board[r][c];
+      if (cell.state === CellState.HIDDEN) {
+        let totalMinesAround = 0;
+        let totalRevealedNeighbors = 0;
+
+        // Check revealed neighbors to calculate risk
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r + dr;
+            const nc = c + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+              const neighbor = board[nr][nc];
+              if (neighbor.state === CellState.REVEALED) {
+                totalRevealedNeighbors++;
+                totalMinesAround += neighbor.neighborMines;
+              }
+            }
+          }
+        }
+
+        const avgRisk = totalRevealedNeighbors > 0 ? totalMinesAround / totalRevealedNeighbors / 8 : 0.1;
+
+        if (!safestCell || avgRisk < safestCell.risk) {
+          safestCell = { row: r, col: c, risk: avgRisk };
+        }
+      }
+    }
+  }
+
+  if (safestCell) {
+    return {
+      row: safestCell.row,
+      col: safestCell.col,
+      confidence: Math.max(0.1, 1.0 - safestCell.risk),
+      reasoning: `Cell (${safestCell.row}, ${safestCell.col}) appears to be the safest option based on neighboring numbers.`
+    };
+  }
+
+  return null;
+};
 
 export const getAiMoveSuggestion = async (
-  board: CellData[][], 
+  board: CellData[][],
   minesTotal: number
 ): Promise<AiHint | null> => {
   try {
-    // 1. Convert board to a text representation efficiently
-    // H = Hidden, F = Flag, 0-8 = Neighbors
-    const rows = board.length;
-    const cols = board[0].length;
-    let gridStr = `Board Size: ${rows}x${cols}. Total Mines: ${minesTotal}.\n`;
-    
-    let knownMines = 0;
-    let hiddenCount = 0;
+    // Simulate API delay for better UX
+    await new Promise(resolve => setTimeout(resolve, 300));
 
-    gridStr += "Current State:\n";
-    for (let r = 0; r < rows; r++) {
-      let rowStr = "";
-      for (let c = 0; c < cols; c++) {
-        const cell = board[r][c];
-        if (cell.state === CellState.REVEALED) {
-          rowStr += cell.neighborMines.toString() + " ";
-        } else if (cell.state === CellState.FLAGGED) {
-          rowStr += "F ";
-          knownMines++;
-        } else {
-          rowStr += "H ";
-          hiddenCount++;
+    const safeMove = findSafeMove(board);
+
+    if (safeMove) {
+      console.log('AI Suggestion:', safeMove);
+      return safeMove;
+    }
+
+    // If no safe move found, return a random hidden cell
+    const hiddenCells: Array<{row: number, col: number}> = [];
+    for (let r = 0; r < board.length; r++) {
+      for (let c = 0; c < board[0].length; c++) {
+        if (board[r][c].state === CellState.HIDDEN) {
+          hiddenCells.push({ row: r, col: c });
         }
       }
-      gridStr += rowStr.trim() + "\n";
     }
 
-    const systemPrompt = `
-      You are a Minesweeper Logic Expert. 
-      Analyze the provided board state. 
-      'H' is Hidden, 'F' is Flagged Mine, numbers 0-8 are revealed cells indicating adjacent mines.
-      Coordinate system: Row 0 is top, Col 0 is left.
-      
-      Your goal: Find the single safest cell to REVEAL next.
-      1. Look for obvious logic (e.g., a '1' touching only 1 hidden cell means that hidden cell is a mine. A '1' touching a known mine means other neighbors are safe).
-      2. If no 100% safe moves exist, calculate the best probability.
-      3. Return the 0-indexed row and column of the cell to REVEAL.
-    `;
-
-    const userPrompt = `
-      Current Board State:
-      ${gridStr}
-
-      Remaining Mines (estimated): ${minesTotal - knownMines}
-      
-      Please provide the safest move in JSON format.
-    `;
-
-    // Define schema for structured output
-    const responseSchema = {
-      type: Type.OBJECT,
-      properties: {
-        row: { type: Type.INTEGER, description: "Row index of the cell to reveal" },
-        col: { type: Type.INTEGER, description: "Column index of the cell to reveal" },
-        confidence: { type: Type.NUMBER, description: "Confidence score 0.0 to 1.0" },
-        reasoning: { type: Type.STRING, description: "Brief explanation of why this move is safe" },
-      },
-      required: ["row", "col", "confidence", "reasoning"],
-    };
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: "application/json",
-        responseSchema: responseSchema,
-        thinkingConfig: { thinkingBudget: 0 } // Flash model usually doesn't need high thinking budget for basic Minesweeper logic
-      },
-    });
-
-    if (response.text) {
-      const hint = JSON.parse(response.text) as AiHint;
-      return hint;
+    if (hiddenCells.length > 0) {
+      const randomCell = hiddenCells[Math.floor(Math.random() * hiddenCells.length)];
+      return {
+        row: randomCell.row,
+        col: randomCell.col,
+        confidence: 0.3,
+        reasoning: 'No obvious safe moves found. Making a calculated guess on a hidden cell.'
+      };
     }
-    
+
     return null;
 
   } catch (error) {
-    console.error("Error fetching AI hint:", error);
+    console.error("Error generating AI hint:", error);
     throw error;
   }
 };
