@@ -1,0 +1,5 @@
+{
+  "name": "AI 智能扫雷 (AI Minesweeper)",
+  "description": "一个经典的扫雷游戏，集成了 Google Gemini AI 作为您的智能助手，可以分析局势并提供下一步操作建议。",
+  "requestFramePermissions": []
+}
